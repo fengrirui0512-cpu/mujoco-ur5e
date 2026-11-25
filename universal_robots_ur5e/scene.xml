@@ -1,0 +1,74 @@
+<!--
+  带中文注释的场景文件，基于 MuJoCo Menagerie；许可证见本目录 LICENSE。
+  阅读顺序：include 引入机器人 → visual 配置显示 → asset 定义纹理 → worldbody 放地面和灯光。
+  XML 注释不参与仿真。文件名和资源引用沿用原目录结构，模型参数未改。
+-->
+<mujoco model="ur5e scene">
+  <!--
+    include 把另一个 MJCF 文件的内容纳入当前模型，避免把场景和机器人结构全写在一处。
+    这里加载同目录的 ur5e.xml；最终仍由一个 MjModel 统一编译场景和机器人。
+  -->
+  <include file="ur5e.xml"/>
+
+  <!--
+    visual 设置画面显示效果，不设置关节控制目标或机器人质量。
+  -->
+  <visual>
+    <!--
+      随相机变化的头灯：diffuse 漫反射、ambient 环境光、specular 镜面反射，各为 RGB 强度。
+    -->
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0 0 0"/>
+    <!--
+      远景雾颜色，四个值是 R、G、B、Alpha；颜色分量通常取 0～1。
+    -->
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <!--
+      初始自由相机的方位角与仰角，单位为度；它们不是机器人关节角。
+      compiler 的 angle 设置不会把这两个相机属性改成弧度。
+    -->
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <!--
+    asset 声明可复用资源；定义纹理和材质本身不会在空间中放一个物体。
+  -->
+  <asset>
+    <!--
+      程序生成渐变天空盒；rgb1、rgb2 为渐变配色，width、height 是纹理像素尺寸，不是米。
+    -->
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <!--
+      生成名为 groundplane 的二维棋盘纹理：两种颜色交替，mark=edge 加入边缘标记。
+      markrgb 是标记颜色；width、height 控制纹理分辨率。
+    -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <!--
+      材质通过 texture 名称引用棋盘纹理；纹理和材质各有独立的名称空间。
+      texuniform 使用统一的空间纹理尺度，texrepeat 控制重复；reflectance 是渲染反射系数。
+      这些外观参数不是接触摩擦系数；摩擦通常由 geom 的 friction 等属性指定。
+    -->
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <!--
+    世界坐标根节点。这里的地面和灯光直接位于世界坐标中，不随机器人关节转动。
+    机器人的 body 树来自前面的 include。位置 pos 单位为米。
+  -->
+  <worldbody>
+    <!--
+      放置光源；pos 为位置，dir 为照射方向向量，方向向量不代表物体位移。
+    -->
+    <light pos="0 -1 2" dir="0 0.7 -0.7"/>
+    <!--
+      directional=true 为平行光；dir 向下，决定入射方向。
+    -->
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <!--
+      plane 是静态平面，未写 pos 时位于原点，默认法向沿 Z 正方向。
+      前两个 size 为零时采用无限延伸的平面显示；平面接触本身也按无限平面处理。
+      第三个 size 用于显示设置，不是地板厚度；material 引用上面定义的棋盘材质。
+    -->
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+  </worldbody>
+</mujoco>

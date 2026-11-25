@@ -1,0 +1,320 @@
+<!--
+  带中文注释的 UR5e 本体文件，基于 MuJoCo Menagerie；上游许可证见本目录 LICENSE。
+  阅读顺序：compiler 编译设置 → option 数值积分 → default 参数模板 → asset 外观资源
+  → worldbody 连杆与关节树 → actuator 执行器 → keyframe 初始姿态。
+  文件名与资源引用沿用原目录结构，所有模型参数与上游相同。
+-->
+<mujoco model="ur5e">
+  <!--
+    angle=radian：本文件适用 compiler 角度规则的关节范围、姿态角等使用弧度。
+    Python 的关节位置和位置控制输入也使用弧度；四元数不是角度值。
+    meshdir 指向本目录下的 assets 网格文件夹，不需要复制或改名网格。
+    autolimits=true：提供 range/ctrlrange/forcerange 等范围时，可自动启用对应限制。
+  -->
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <!--
+    implicitfast 是数值积分方法，适合这里包含较强速度反馈的动力学模型。
+    未显式填写的 timestep、gravity 等采用 MuJoCo 默认值；这并不表示没有步长或没有重力。
+    目前不修改积分器，避免同时改变多个实验条件。
+  -->
+  <option integrator="implicitfast"/>
+
+  <!--
+    default 定义参数模板，不会单独创建关节、几何体或电机。
+    嵌套模板继承父模板，再用自身属性覆盖；class 用于选择模板。
+  -->
+  <default>
+    <!--
+      机器人公共模板。base 的 childclass=ur5e 让其后代默认使用这一组设置。
+    -->
+    <default class="ur5e">
+      <!--
+        公共外观材质参数：specular 为镜面高光强度，shininess 控制高光特性，不影响力学。
+      -->
+      <material specular="0.5" shininess="0.25"/>
+      <!--
+        关节未指定 type 时默认为 hinge 转动关节；默认轴沿关节所属 body 的局部 Y 轴。
+        range 为关节下限和上限，约 ±2π rad，即 ±360°。
+        armature 为附加在关节自由度上的惯量，此处单位 kg·m²，可表征折算转子惯量。
+        它不是 damping 阻尼；个别关节会在自身标签中覆盖默认转轴或范围。
+      -->
+      <joint axis="0 1 0" range="-6.28319 6.28319" armature="0.1"/>
+      <!--
+        general 是通用执行器，此处配置成位置伺服：并非所有 general 的 ctrl 都是角度。
+        本模型使用默认 gear=1、无激活动力学，固定增益与仿射偏置给出力矩：
+        τ = 2000×ctrl - 2000×q - 400×qdot，等价于 kp×(目标角-q)-kv×qdot。
+        这里 kp=2000 N·m/rad，kv=400 N·m·s/rad；ctrlrange 是位置指令范围，单位 rad。
+        下一行 forcerange 是执行器输出限幅，本转动关节模型对应 ±150 N·m。
+        关节范围、指令范围、力矩范围是三个不同的限制，不要混为一谈。
+      -->
+      <general gaintype="fixed" biastype="affine" ctrlrange="-6.2831 6.2831" gainprm="2000" biasprm="0 -2000 -400"
+        forcerange="-150 150"/>
+      <!--
+        肩部与肘部使用的大关节模板，继承 ur5e 的执行器增益和力矩范围。
+        模板名称由模型作者定义，不是 MuJoCo 固定关键字，也不是尺寸单位。
+      -->
+      <default class="size3">
+        <!--
+          肘部模板：沿用大关节增益，但将关节范围和指令范围缩到约 ±π rad。
+        -->
+        <default class="size3_limited">
+          <joint range="-3.1415 3.1415"/>
+          <general ctrlrange="-3.1415 3.1415"/>
+        </default>
+      </default>
+      <!--
+        腕部模板：采用较小增益和较小的力矩范围。
+      -->
+      <default class="size1">
+        <!--
+          腕部力矩 τ=500×(ctrl-q)-100×qdot；位置增益 500，速度增益 100。
+          输出限制 ±28 N·m，不能把肩部的增益和输出能力直接当作腕部参数。
+        -->
+        <general gainprm="500" biasprm="0 -500 -100" forcerange="-28 28"/>
+      </default>
+      <!--
+        外观几何体模板：精细网格负责显示，避免把每个细节都用于接触计算。
+      -->
+      <default class="visual">
+        <!--
+          type=mesh 使用网格；contype/conaffinity 均为零，禁用其常规接触配对。
+          group=2 是可视分组，方便查看器切换显示；group 本身不决定是否发生碰撞。
+        -->
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <!--
+        碰撞几何体模板：使用简单形状近似连杆，计算接触的成本更低。
+      -->
+      <default class="collision">
+        <!--
+          capsule 是两端半球的胶囊体。未用 fromto 时，size 前两项为半径和中段半长，单位 m。
+          默认轴沿几何体局部 Z 轴，pos、quat 决定它在所属 body 内的位置和姿态。
+        -->
+        <geom type="capsule" group="3"/>
+        <!--
+          末端碰撞几何体的子模板，覆盖胶囊体类型为圆柱。
+        -->
+        <default class="eef_collision">
+          <!--
+            cylinder 的 size 为半径、半高，单位 m。
+          -->
+          <geom type="cylinder"/>
+        </default>
+      </default>
+      <!--
+        site 是坐标或位置标记，可供末端定位和传感器引用，不提供质量或碰撞体。
+      -->
+      <site size="0.001" rgba="0.5 0.5 0.5 0.3" group="4"/>
+    </default>
+  </default>
+
+  <!--
+    定义材质和 OBJ 网格资源，下面的 geom 通过名称引用。
+    rgba 的四个值是红、绿、蓝、透明度；它们控制外观，不改变质量和关节运动。
+  -->
+  <asset>
+    <material class="ur5e" name="black" rgba="0.033 0.033 0.033 1"/>
+    <material class="ur5e" name="jointgray" rgba="0.278 0.278 0.278 1"/>
+    <material class="ur5e" name="linkgray" rgba="0.82 0.82 0.82 1"/>
+    <material class="ur5e" name="urblue" rgba="0.49 0.678 0.8 1"/>
+
+    <!--
+      以下 OBJ 文件从 compiler.meshdir 加载。未写 name 时，通常以文件名去掉扩展名作为资源名。
+      同一连杆常拆为多个网格，以便分别赋予蓝色、黑色或金属材质。
+      mesh 声明资源，geom 才把资源放到机器人 body 上；网格本身不是执行器。
+    -->
+    <mesh file="base_0.obj"/>
+    <mesh file="base_1.obj"/>
+    <mesh file="shoulder_0.obj"/>
+    <mesh file="shoulder_1.obj"/>
+    <mesh file="shoulder_2.obj"/>
+    <mesh file="upperarm_0.obj"/>
+    <mesh file="upperarm_1.obj"/>
+    <mesh file="upperarm_2.obj"/>
+    <mesh file="upperarm_3.obj"/>
+    <mesh file="forearm_0.obj"/>
+    <mesh file="forearm_1.obj"/>
+    <mesh file="forearm_2.obj"/>
+    <mesh file="forearm_3.obj"/>
+    <mesh file="wrist1_0.obj"/>
+    <mesh file="wrist1_1.obj"/>
+    <mesh file="wrist1_2.obj"/>
+    <mesh file="wrist2_0.obj"/>
+    <mesh file="wrist2_1.obj"/>
+    <mesh file="wrist2_2.obj"/>
+    <mesh file="wrist3.obj"/>
+  </asset>
+
+  <!--
+    body 嵌套表示串联机器人树：base → shoulder → upper_arm → forearm → wrist_1 → wrist_2 → wrist_3。
+    子 body 的 pos、quat 相对于父 body；关节运动会带动整棵后代子树。
+    pos 单位 m；quat 顺序为 w x y z，会在编译时归一化，不能按欧拉角读取。
+    inertial 给出质量、质心及惯量；geom 描述外观或碰撞，它们的用途不同。
+  -->
+  <worldbody>
+    <!--
+      base 没有关节，因此相对于世界固定；并非一定需要单独写“固定关节”。
+      该四元数表示绕 Z 轴 180° 的姿态。childclass 让后代默认继承 ur5e 模板。
+    -->
+    <body name="base" quat="0 0 0 -1" childclass="ur5e">
+      <!--
+        inertial 的 mass 单位 kg；pos 是该刚体局部坐标中的质心位置，单位 m。
+        diaginertia 是惯性主轴坐标中的三个主惯量，单位 kg·m²，不是三个方向的质量。
+        若 inertial 写 quat，表示惯性坐标系相对于 body 的旋转；否则取默认姿态。
+        这些数据已经显式给出，不应仅凭网格外形推断刚体质量。
+      -->
+      <inertial mass="4.0" pos="0 0 0" diaginertia="0.00443333156 0.00443333156 0.0072"/>
+      <!--
+        引用 base_0 网格和 black 材质，使用 visual 模板；随后 base_1 是同一底座的另一外观部分。
+      -->
+      <geom mesh="base_0" material="black" class="visual"/>
+      <geom mesh="base_1" material="jointgray" class="visual"/>
+      <!--
+        肩部连杆位于父坐标 Z=0.163 m；内部关节决定此 body 相对 base 的运动。
+      -->
+      <body name="shoulder_link" pos="0 0 0.163">
+        <inertial mass="3.7" pos="0 0 0" diaginertia="0.0102675 0.0102675 0.00666"/>
+        <!--
+          肩部回转关节：覆盖默认轴为局部 Z，关节未写 pos 时在 body 原点。
+          本次 Python 实验读取它的实际 qpos；驱动它的执行器名称为 shoulder_pan。
+        -->
+        <joint name="shoulder_pan_joint" class="size3" axis="0 0 1"/>
+        <geom mesh="shoulder_0" material="urblue" class="visual"/>
+        <geom mesh="shoulder_1" material="black" class="visual"/>
+        <geom mesh="shoulder_2" material="jointgray" class="visual"/>
+        <!--
+          肩部碰撞胶囊体：半径 0.06 m、中段半长 0.06 m，中心位于 body 局部 Z=-0.04 m。
+          简单碰撞体与精细外观不必完全重合，二者是有意分开的近似。
+        -->
+        <geom class="collision" size="0.06 0.06" pos="0 0 -0.04"/>
+        <!--
+          上臂相对于 shoulder_link 平移并旋转；quat 归一化后表示绕 Y 轴 90°。
+          因此后续局部轴方向不能直接当作世界坐标的同名轴。
+        -->
+        <body name="upper_arm_link" pos="0 0.138 0" quat="1 0 1 0">
+          <inertial mass="8.393" pos="0 0 0.2125" diaginertia="0.133886 0.133886 0.0151074"/>
+          <!--
+            肩部抬升关节：沿模板的局部 Y 轴旋转。肩部回转的后代包括此上臂及全部腕部。
+          -->
+          <joint name="shoulder_lift_joint" class="size3"/>
+          <geom mesh="upperarm_0" material="linkgray" class="visual"/>
+          <geom mesh="upperarm_1" material="black" class="visual"/>
+          <geom mesh="upperarm_2" material="jointgray" class="visual"/>
+          <geom mesh="upperarm_3" material="urblue" class="visual"/>
+          <geom class="collision" pos="0 -0.04 0" quat="1 1 0 0" size="0.06 0.06"/>
+          <geom class="collision" size="0.05 0.2" pos="0 0 0.2"/>
+          <!--
+            前臂相对于上臂连接；pos 是连接坐标位置，不是世界坐标中的绝对位置。
+          -->
+          <body name="forearm_link" pos="0 -0.131 0.425">
+            <inertial mass="2.275" pos="0 0 0.196" diaginertia="0.0311796 0.0311796 0.004095"/>
+            <!--
+              肘关节：选择 size3_limited，因此关节和目标范围约为 ±180°，不是默认的 ±360°。
+            -->
+            <joint name="elbow_joint" class="size3_limited"/>
+            <geom mesh="forearm_0" material="urblue" class="visual"/>
+            <geom mesh="forearm_1" material="linkgray" class="visual"/>
+            <geom mesh="forearm_2" material="black" class="visual"/>
+            <geom mesh="forearm_3" material="jointgray" class="visual"/>
+            <geom class="collision" pos="0 0.08 0" quat="1 1 0 0" size="0.055 0.06"/>
+            <geom class="collision" size="0.038 0.19" pos="0 0 0.2"/>
+            <!--
+              第一个腕部连杆，连接在前臂末端，并通过 quat 调整局部坐标姿态。
+            -->
+            <body name="wrist_1_link" pos="0 0 0.392" quat="1 0 1 0">
+              <inertial mass="1.219" pos="0 0.127 0" diaginertia="0.0025599 0.0025599 0.0021942"/>
+              <!--
+                腕部关节 1：局部 Y 轴，使用 size1 的较小增益与输出力矩限制。
+              -->
+              <joint name="wrist_1_joint" class="size1"/>
+              <geom mesh="wrist1_0" material="black" class="visual"/>
+              <geom mesh="wrist1_1" material="urblue" class="visual"/>
+              <geom mesh="wrist1_2" material="jointgray" class="visual"/>
+              <geom class="collision" pos="0 0.05 0" quat="1 1 0 0" size="0.04 0.07"/>
+              <!--
+                第二个腕部连杆，位于父 body 局部 Y=0.127 m。
+              -->
+              <body name="wrist_2_link" pos="0 0.127 0">
+                <inertial mass="1.219" pos="0 0 0.1" diaginertia="0.0025599 0.0025599 0.0021942"/>
+                <!--
+                  腕部关节 2：显式改为局部 Z 轴；与相邻关节的轴不同，形成末端姿态自由度。
+                -->
+                <joint name="wrist_2_joint" axis="0 0 1" class="size1"/>
+                <geom mesh="wrist2_0" material="black" class="visual"/>
+                <geom mesh="wrist2_1" material="urblue" class="visual"/>
+                <geom mesh="wrist2_2" material="jointgray" class="visual"/>
+                <geom class="collision" size="0.04 0.06" pos="0 0 0.04"/>
+                <geom class="collision" pos="0 0.02 0.1" quat="1 1 0 0" size="0.04 0.04"/>
+                <!--
+                  最后一个腕部连杆，位于父 body 局部 Z=0.1 m；当前没有附加夹爪。
+                -->
+                <body name="wrist_3_link" pos="0 0 0.1">
+                  <inertial mass="0.1889" pos="0 0.0771683 0" quat="1 0 0 1"
+                    diaginertia="0.000132134 9.90863e-05 9.90863e-05"/>
+                  <!--
+                    腕部关节 3：沿默认局部 Y 轴转动，是串联链的第六个转动关节。
+                  -->
+                  <joint name="wrist_3_joint" class="size1"/>
+                  <geom material="linkgray" mesh="wrist3" class="visual"/>
+                  <geom class="eef_collision" pos="0 0.08 0" quat="1 1 0 0" size="0.04 0.02"/>
+                  <!--
+                    末端安装参考标记，位置和姿态相对于 wrist_3_link。
+                    后续可读取 data.site_xpos 等世界坐标数据，用来研究末端位置或安装工具。
+                    site 本身不是夹爪，也不会提供抓取约束。
+                  -->
+                  <site name="attachment_site" pos="0 0.1 0" quat="-1 1 0 0"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!--
+    六个执行器按下列顺序对应 data.ctrl 的六个元素；用名称查询可避免硬编码索引。
+    每行 joint 属性将执行器绑定到一个关节，class 指定继承哪套增益和限制。
+    Python 更新 ctrl 后，mj_step 才会根据目标和状态计算运动；仅改 ctrl 不会推进时间。
+  -->
+  <actuator>
+    <!--
+      肩部回转：move_shoulder.py 通过 actuator("shoulder_pan").id 找到这一控制输入。
+    -->
+    <general class="size3" name="shoulder_pan" joint="shoulder_pan_joint"/>
+    <!--
+      肩部抬升：本实验保持其 home 目标，实际角度仍可能因动力学存在偏差。
+    -->
+    <general class="size3" name="shoulder_lift" joint="shoulder_lift_joint"/>
+    <!--
+      肘部：沿用大关节伺服参数，应用较窄的位置指令范围。
+    -->
+    <general class="size3_limited" name="elbow" joint="elbow_joint"/>
+    <!--
+      腕部执行器 1，对应 wrist_1_joint。
+    -->
+    <general class="size1" name="wrist_1" joint="wrist_1_joint"/>
+    <!--
+      腕部执行器 2，对应 wrist_2_joint。
+    -->
+    <general class="size1" name="wrist_2" joint="wrist_2_joint"/>
+    <!--
+      腕部执行器 3，对应 wrist_3_joint。
+    -->
+    <general class="size1" name="wrist_3" joint="wrist_3_joint"/>
+  </actuator>
+
+  <!--
+    keyframe 保存可恢复的状态快照；仅声明 key 不会自动把仿真初始化到该姿态。
+    脚本调用 mj_resetDataKeyframe(model, data, model.key("home").id) 才恢复 home。
+  -->
+  <keyframe>
+    <!--
+      qpos 为六个实际关节位置，ctrl 为六个执行器位置目标；两者此处按模型顺序一一对应。
+      单位 rad，约对应 [-90°, -90°, 90°, -90°, -90°, 0°]；这是关节角，不是末端姿态角。
+      相同 qpos 和 ctrl 不保证此后始终静止：重力等作用仍会进入动力学计算。
+    -->
+    <key name="home" qpos="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0" ctrl="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0"/>
+  </keyframe>
+</mujoco>

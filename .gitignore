@@ -1,0 +1,14 @@
+# Python 缓存和虚拟环境不属于项目源代码。
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本地编辑器配置、临时日志和系统文件不上传。
+.vscode/
+.idea/
+MUJOCO_LOG.TXT
+*.log
+.DS_Store
+
+# 不忽略 *.obj：assets 中的 OBJ 是机器人网格，必须随模型保留。
